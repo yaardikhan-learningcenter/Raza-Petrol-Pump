@@ -1,0 +1,4 @@
+# Never commit your data backups
+*.json
+!package.json
+.DS_Store

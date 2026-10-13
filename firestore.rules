@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only the people listed here can read/write the ERP data.
+    // Replace with the email(s) of the users you created in Firebase Authentication.
+    match /erp/{doc} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email in [
+          "owner@example.com",
+          "accountant@example.com"
+        ];
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

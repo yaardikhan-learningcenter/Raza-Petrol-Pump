@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raza Petroleum Services — ERP</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo">⛽</div>
+      <div>
+        <div class="name" id="brand-name">RAZA PETROLEUM SERVICES</div>
+        <div class="sub">ERP &amp; Accounting</div>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div id="sidebar-footer">Cloud-synced · multi-device</div>
+  </aside>
+  <div id="overlay-scrim" onclick="closeSidebar()"></div>
+
+  <div id="main-wrap">
+    <div id="topbar">
+      <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+        <button id="menu-toggle" onclick="toggleSidebar()">☰</button>
+        <div>
+          <div class="page-title" id="page-title">Dashboard</div>
+          <div class="page-sub" id="page-sub"></div>
+        </div>
+      </div>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<div id="modal-backdrop"><div class="modal" id="modal"></div></div>
+<div id="toast-wrap"></div>
+
+<!-- Login / first-run screen (managed by js/cloud.js) -->
+<div id="login-overlay"><div class="login-card" id="login-card"></div></div>
+
+<!-- Firebase SDK (cloud database + login) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+<script src="cloud.js"></script>
+
+<!-- Shows a clear message if the site files were not uploaded correctly -->
+<div id="load-error" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;padding:30px;font-family:Arial,sans-serif;line-height:1.6;color:#222">
+  <h2 style="color:#b3261e">Site files are missing</h2>
+  <p>The page loaded, but some files did not. On GitHub, the repository must contain these files <b>in the main (root) folder</b>:</p>
+  <p><code>index.html, style.css, app.js, cloud.js, firebase-config.js</code></p>
+  <p>Do not upload the .zip itself — unzip it first and upload the files inside. Then wait 1–2 minutes and refresh (Ctrl+F5).</p>
+  <p id="load-error-detail" style="color:#777;font-size:13px"></p>
+</div>
+<script>
+window.addEventListener('load', function(){
+  setTimeout(function(){
+    var sb = document.getElementById('sidebar');
+    var cssOk = sb && getComputedStyle(sb).position === 'fixed';
+    var jsOk = window.ERP_JS_OK === true && window.ERP_CLOUD_OK === true;
+    if (!cssOk || !jsOk){
+      document.getElementById('load-error-detail').textContent =
+        'Missing: ' + [!cssOk ? 'style.css' : '', window.ERP_JS_OK ? '' : 'app.js', window.ERP_CLOUD_OK ? '' : 'cloud.js'].filter(Boolean).join(', ');
+      document.getElementById('load-error').style.display = 'block';
+    }
+  }, 400);
+});
+</script>
+</body>
+</html>
