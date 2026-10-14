@@ -11,7 +11,8 @@ window.ERP_CLOUD_OK = true;
    ========================================================= */
 var COLLECTION = 'erp';
 var TX_KEYS = ['nozzleDiesel','nozzlePetrol','dip','creditSale','cashOils','purchases','receipts','payments','expenses','fundTransfer','partnersLedger','employeeLedger'];
-var MASTER_ARRAYS = ['oils','customers','suppliers','banks','partners','employees'];
+var MASTER_ARRAYS = ['oils','customers','suppliers','banks','partners','employees','expenseHeads'];
+var DEFAULT_EXPENSE_HEADS = ['Salaries','Electricity','Rent','Maintenance','Fuel Testing','Security','Stationery','Refreshment','Misc / Other'];
 var MASTER_OBJECTS = ['meta','tanks','fuel','nozzles','calibration'];
 
 var isDirty = false;
@@ -44,6 +45,8 @@ function applyChunk(id, jsonStr){
   if (id.indexOf('tx_') === 0) DB.tx[id.slice(3)] = v; else DB[id] = v;
 }
 function ensureShape(){
+  // first time after this upgrade: create the expense categories list from the old built-in list
+  if (!DB.expenseHeads) DB.expenseHeads = DEFAULT_EXPENSE_HEADS.map(function(n, i){ return { id: 'EH_' + (i + 1), name: n }; });
   MASTER_OBJECTS.forEach(function(k){ if (!DB[k]) DB[k] = {}; });
   MASTER_ARRAYS.forEach(function(k){ if (!DB[k]) DB[k] = []; });
   if (!DB.tx) DB.tx = {};
