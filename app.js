@@ -98,7 +98,7 @@ function toast(msg, type){
    DATA STORE
    ========================================================= */
 /* DB is filled from the cloud (Firestore) by js/cloud.js after login */
-var DB = {meta:{},tanks:{},fuel:{},nozzles:{},oils:[],customers:[],suppliers:[],banks:[],partners:[],employees:[],calibration:{},tx:{}};
+var DB = {meta:{},tanks:{},fuel:{},nozzles:{},oils:[],customers:[],suppliers:[],banks:[],partners:[],employees:[],expenseHeads:[],calibration:{},tx:{}};
 var seqCounter = 1;
 function stampSeq(){
   seqCounter = 1;
@@ -749,7 +749,7 @@ PAGES['setup'] = function(root){
   const tabs = [
     ['general','General & Tanks'], ['nozzles','Nozzles'], ['oils','Oils / Lubricants'],
     ['customers','Customers'], ['suppliers','Suppliers'], ['banks','Banks'],
-    ['partners','Partners'], ['employees','Employees']
+    ['partners','Partners'], ['employees','Employees'], ['expenseHeads','Expense Categories']
   ];
   root.innerHTML = `
     <div class="tabs">${tabs.map(t=>`<button class="tab-btn ${setupTab===t[0]?'active':''}" onclick="setupTab='${t[0]}'; renderPage();">${t[1]}</button>`).join('')}</div>
@@ -759,7 +759,7 @@ PAGES['setup'] = function(root){
   const renderers = {
     general: renderSetupGeneral, nozzles: renderSetupNozzles, oils: renderSetupOils,
     customers: renderSetupCustomers, suppliers: renderSetupSuppliers, banks: renderSetupBanks,
-    partners: renderSetupPartners, employees: renderSetupEmployees
+    partners: renderSetupPartners, employees: renderSetupEmployees, expenseHeads: renderSetupExpenseHeads
   };
   renderers[setupTab](body);
 };
@@ -947,6 +947,52 @@ function submitMasterForm(key, id){
 }
 function deleteMasterRow(key, id){
   confirmDelete('Delete this entry? Historical records referencing it are kept as-is.', ()=>{ masterDelete(key, id); renderPage(); });
+}
+
+
+/* ---------- Expense categories (Setup) — these feed the Head dropdown on the Expenses page ---------- */
+function renderSetupExpenseHeads(el){
+  const used = {};
+  DB.tx.expenses.forEach(r=>{ used[r.head] = (used[r.head]||0) + 1; });
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><div><h3>Expense Categories (${DB.expenseHeads.length})</h3>
+        <div class="hint">Categories added here appear automatically in the “Head” list when you add an expense.</div></div>
+        <button class="btn btn-primary btn-sm" onclick="openExpenseHeadForm()">+ Add Category</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr>
+        <th>Category</th><th class="num">Expenses recorded</th><th></th>
+      </tr></thead><tbody>
+      ${DB.expenseHeads.length? DB.expenseHeads.map(h=>`<tr>
+        <td>${esc(h.name)}</td><td class="num muted">${used[h.name]||0}</td>
+        <td class="row-actions">
+          <button class="btn btn-sm btn-icon" onclick="openExpenseHeadForm('${h.id}')">✏️</button>
+          <button class="btn btn-sm btn-icon btn-danger" onclick="deleteExpenseHead('${h.id}')">🗑️</button>
+        </td>
+      </tr>`).join('') : emptyRow(3,'No categories yet — click “Add Category”.')}
+      </tbody></table></div>
+    </div>
+    <p class="small-note" style="margin-top:12px;">Renaming a category also renames it on existing expense entries. Deleting a category only removes it from the dropdown — old expense entries keep their category.</p>`;
+}
+function openExpenseHeadForm(id){
+  const h = id? DB.expenseHeads.find(x=>x.id===id) : {name:''};
+  openModal(id?'Edit Expense Category':'Add Expense Category',
+    `<div class="field"><label>Category name</label><input id="m-name" value="${esc(h.name)}" placeholder="e.g. Generator Diesel, Tea & Snacks" onkeydown="if(event.key==='Enter') submitExpenseHeadForm('${id||''}')"></div>`,
+    `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="submitExpenseHeadForm('${id||''}')">Save</button>`);
+  setTimeout(()=>{ const i=document.getElementById('m-name'); if(i) i.focus(); }, 50);
+}
+function submitExpenseHeadForm(id){
+  const name = val('m-name').trim();
+  if(!name){ toast('Category name is required.','err'); return; }
+  if(DB.expenseHeads.some(x=>x.id!==id && x.name.toLowerCase()===name.toLowerCase())){ toast('This category already exists.','err'); return; }
+  if(id){
+    const old = DB.expenseHeads.find(x=>x.id===id);
+    if(old && old.name!==name) DB.tx.expenses.forEach(r=>{ if(r.head===old.name) r.head = name; });
+    masterUpdate('expenseHeads', id, {name});
+  } else masterAdd('expenseHeads', {name}, 'EH');
+  markDirty(); closeModal(); renderPage(); toast('Category saved.','ok');
+}
+function deleteExpenseHead(id){
+  confirmDelete('Delete this category? Existing expense entries keep their category name.', ()=>{ masterDelete('expenseHeads', id); renderPage(); });
 }
 
 function renderSetupEmployees(el){
@@ -1725,7 +1771,12 @@ function deletePayment(id){ confirmDelete('Delete this payment?', ()=>{ txDelete
 /* =========================================================
    PAGE: EXPENSES
    ========================================================= */
-var EXPENSE_HEADS = ['Salaries','Electricity','Rent','Maintenance','Fuel Testing','Security','Stationery','Refreshment','Misc / Other'];
+/* Categories come from Setup → Expense Categories. A category used by an old entry (but since deleted) is still listed when editing that entry. */
+function expenseHeadNames(extra){
+  const names = DB.expenseHeads.map(h=>h.name);
+  if(extra && names.indexOf(extra)<0) names.push(extra);
+  return names;
+}
 PAGES['expenses'] = function(el){
   const rows = sortByDate(DB.tx.expenses).reverse();
   const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
@@ -1755,7 +1806,7 @@ function openExpenseForm(id){
   const row = id? DB.tx.expenses.find(r=>r.id===id) : null;
   openModal((row?'Edit':'Add')+' Expense', `
     <div class="field"><label>Date</label><input type="date" id="m-date" value="${row?row.date:todayISO()}"></div>
-    <div class="field"><label>Head</label><select id="m-head">${EXPENSE_HEADS.map(h=>`<option ${row&&row.head===h?'selected':''}>${h}</option>`).join('')}</select></div>
+    <div class="field"><label>Head</label><select id="m-head">${expenseHeadNames(row&&row.head).map(h=>`<option value="${esc(h)}" ${row&&row.head===h?'selected':''}>${esc(h)}</option>`).join('')}</select></div>
     <div class="field"><label>Paid To (optional)</label><input id="m-paidto" value="${row?esc(row.paidTo||''):''}"></div>
     <div class="field-row">
       <div class="field"><label>Mode</label><select id="m-mode">${modeOptionsHtml(row?row.mode:'Cash')}</select></div>
@@ -1769,6 +1820,7 @@ function submitExpenseForm(id){
   if(!date){ toast('Date is required.','err'); return; }
   const amount = numVal('m-amount');
   if(amount<=0){ toast('Amount must be greater than zero.','err'); return; }
+  if(!val('m-head')){ toast('Add an expense category first (Setup → Expense Categories).','err'); return; }
   const obj = {date, head: val('m-head'), paidTo: val('m-paidto').trim(), mode: val('m-mode'), amount, narration: val('m-narration').trim()};
   if(id) txUpdate('expenses', id, obj); else txAdd('expenses', obj);
   closeModal(); renderPage(); toast('Expense saved.','ok');
