@@ -602,6 +602,8 @@ var NAV = [
   ]},
   {title:'Reports', items:[
     {id:'day-book', icon:'📖', label:'Day Book'},
+    {id:'nozzle-report-diesel', icon:'🛢️', label:'Diesel Nozzle Report'},
+    {id:'nozzle-report-petrol', icon:'⛽', label:'Petrol Nozzle Report'},
     {id:'weekly-report', icon:'📅', label:'Weekly Report'},
     {id:'monthly-report', icon:'🗓️', label:'Monthly Report'},
     {id:'yearly-report', icon:'📈', label:'Yearly Report'},
@@ -630,6 +632,8 @@ var PAGE_META = {
   'stock-summary':['Stock Summary','Closing stock \u2014 all products, as of any date'],
   'cash-bank-ledger':['Cash & Bank Ledger','Mode-wise daily balances'],
   'day-book':['Day Book','Daily cash book register'],
+  'nozzle-report-diesel':['HSD (Diesel) Nozzle Report','Each nozzle — daily, weekly &amp; yearly sales'],
+  'nozzle-report-petrol':['PMG (Petrol) Nozzle Report','Each nozzle — daily, weekly &amp; yearly sales'],
   'weekly-report':['Weekly Report','Any 7-day window'],
   'monthly-report':['Monthly Report','Pick a month'],
   'yearly-report':['Yearly Report','Pick a year'],
@@ -2323,6 +2327,161 @@ function expenseDetailHtml(start,end){
     6, pl.discount);
   return summary + exp + sal + bank + disc;
 }
+
+/* =========================================================
+   PAGES: NOZZLE-WISE REPORTS (Diesel / Petrol) — daily, weekly, yearly
+   ========================================================= */
+var nrTab = 'daily';
+var _nr = {};   // per-kind picker state: {daily, weekStart, year}
+var NR_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function nrLatest(kind){
+  const rows = sortByDate(DB.tx[nozzleKey(kind)]);
+  return rows.length ? rows[rows.length-1].date : todayISO();
+}
+function nrState(kind){
+  if(!_nr[kind]){
+    const last = nrLatest(kind);
+    _nr[kind] = {daily:last, weekStart:addDaysISO(last,-6), year:Number(last.slice(0,4))};
+  }
+  return _nr[kind];
+}
+/* All entries of one fuel inside [start,end], with per-nozzle litres / amount totals */
+function nrCollect(kind, start, end){
+  const nz = DB.nozzles[kind];
+  const rows = sortByDate(DB.tx[nozzleKey(kind)]).filter(r=>dateInRange(r.date,start,end)).map(r=>{
+    const c = computeNozzleRow(kind, r);
+    return {date:r.date, c, closings:r.closings};
+  });
+  const tot = nz.map(()=>({litres:0, amount:0}));
+  let L=0, A=0;
+  rows.forEach(x=>{
+    x.c.sales.forEach((s,i)=>{ tot[i].litres += s; tot[i].amount += s*x.c.rate; });
+    L += x.c.totalLitres; A += x.c.amount;
+  });
+  return {nz, rows, tot, L, A};
+}
+function nrSummaryHtml(kind, d, title){
+  const days = d.rows.length;
+  return `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-head"><h3>${title}</h3><span class="badge gray">${days} day${days===1?'':'s'} with readings</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr>
+        <th>Nozzle</th><th class="num">Litres Sold</th><th class="num">Sale Amount</th><th class="num">Share %</th><th class="num">Avg L / Day</th>
+      </tr></thead><tbody>
+      ${d.nz.map((n,i)=>`<tr>
+        <td><b>${esc(n.name)}</b></td>
+        <td class="num">${num(d.tot[i].litres,0)} L</td>
+        <td class="num">${money(d.tot[i].amount)}</td>
+        <td class="num">${d.L? (d.tot[i].litres/d.L*100).toFixed(1):'0.0'}%</td>
+        <td class="num muted">${days? num(d.tot[i].litres/days,0):'—'} L</td>
+      </tr>`).join('')}
+      </tbody><tfoot><tr><td>Total</td><td class="num">${num(d.L,0)} L</td><td class="num">${money(d.A)}</td><td class="num">100%</td><td class="num">${days? num(d.L/days,0):'—'} L</td></tr></tfoot></table></div>
+    </div>`;
+}
+/* buckets: [{label, sales:[per nozzle litres], litres, amount}] */
+function nrMatrixHtml(kind, firstHead, buckets, title, withChart){
+  const nz = DB.nozzles[kind];
+  const sums = nz.map((n,i)=> buckets.reduce((s,b)=>s+(b.sales[i]||0),0));
+  const totL = buckets.reduce((s,b)=>s+b.litres,0), totA = buckets.reduce((s,b)=>s+b.amount,0);
+  const chart = withChart ? `
+      <div style="padding:14px 16px 4px 16px;">
+        ${svgBarChart(buckets.map(b=>b.label), nz.map((n,i)=>({name:n.name, data:buckets.map(b=>b.sales[i]||0), color:CHART_COLORS[i%CHART_COLORS.length]})), {height:210})}
+        <div class="chart-legend">${nz.map((n,i)=>`<span><i style="background:${CHART_COLORS[i%CHART_COLORS.length]}"></i>${esc(n.name)}</span>`).join('')}</div>
+      </div>` : '';
+  return `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-head"><h3>${title}</h3><div class="hint">Litres sold per nozzle</div></div>
+      ${chart}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr>
+        <th>${firstHead}</th>${nz.map(n=>`<th class="num">${esc(n.name)} (L)</th>`).join('')}<th class="num">Total L</th><th class="num">Sale Amount</th>
+      </tr></thead><tbody>
+      ${buckets.map(b=>`<tr>
+        <td>${esc(b.label)}</td>
+        ${nz.map((n,i)=>`<td class="num">${b.sales[i]? num(b.sales[i],0):'<span class="muted">—</span>'}</td>`).join('')}
+        <td class="num"><b>${b.litres? num(b.litres,0):'—'}</b></td><td class="num">${b.amount? money(b.amount):'—'}</td>
+      </tr>`).join('')}
+      </tbody><tfoot><tr><td>Total</td>${sums.map(s=>`<td class="num">${num(s,0)}</td>`).join('')}<td class="num">${num(totL,0)}</td><td class="num">${money(totA)}</td></tr></tfoot></table></div>
+    </div>`;
+}
+function nrDayBuckets(kind, start, end){
+  const d = nrCollect(kind, start, end);
+  const byDate = {}; d.rows.forEach(x=>{ byDate[x.date]=x; });
+  const out = [];
+  for(let dt=start; dt<=end; dt=addDaysISO(dt,1)){
+    const x = byDate[dt];
+    out.push({label:fmtDateShort(dt), sales:x?x.c.sales:d.nz.map(()=>0), litres:x?x.c.totalLitres:0, amount:x?x.c.amount:0});
+  }
+  return out;
+}
+
+function renderNozzleReport(el, kind){
+  const st = nrState(kind);
+  const title = kind==='diesel' ? 'HSD (Diesel)' : 'PMG (Petrol)';
+  const nz = DB.nozzles[kind];
+  const tabs = [['daily','Daily'],['weekly','Weekly'],['yearly','Yearly']];
+  let picker='', body='';
+
+  if(nrTab==='daily'){
+    const date = st.daily;
+    const d = nrCollect(kind, date, date);
+    const x = d.rows[0];
+    picker = `<label style="font-weight:700; font-size:13px;">Date</label>
+      <input type="date" value="${date}" onchange="_nr['${kind}'].daily=this.value; renderPage();" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px;">
+      <button class="btn btn-sm" onclick="_nr['${kind}'].daily='${addDaysISO(date,-1)}'; renderPage();">◀ Prev</button>
+      <button class="btn btn-sm" onclick="_nr['${kind}'].daily='${addDaysISO(date,1)}'; renderPage();">Next ▶</button>
+      <span class="small-note">Showing: <b>${fmtDate(date)}</b></span>`;
+    const detail = x ? `
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head"><h3>${title} — ${fmtDate(date)}</h3><span class="badge green">${num(x.c.totalLitres,0)} L · ${money(x.c.amount)}</span></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+          <th>Nozzle</th><th class="num">Opening</th><th class="num">Closing</th><th class="num">Litres Sold</th><th class="num">Rate</th><th class="num">Sale Amount</th><th class="num">Share %</th>
+        </tr></thead><tbody>
+        ${nz.map((n,i)=>`<tr>
+          <td><b>${esc(n.name)}</b></td>
+          <td class="num muted">${num(x.c.opens[i],0)}</td><td class="num">${num(x.closings[i],0)}</td>
+          <td class="num"><b>${num(x.c.sales[i],0)} L</b></td><td class="num">${money(x.c.rate)}</td>
+          <td class="num">${money(x.c.sales[i]*x.c.rate)}</td>
+          <td class="num muted">${x.c.totalLitres? (x.c.sales[i]/x.c.totalLitres*100).toFixed(1):'0.0'}%</td>
+        </tr>`).join('')}
+        </tbody><tfoot><tr><td>Total</td><td></td><td></td><td class="num">${num(x.c.totalLitres,0)} L</td><td></td><td class="num">${money(x.c.amount)}</td><td class="num">100%</td></tr></tfoot></table></div>
+      </div>` : `<div class="card card-pad" style="margin-bottom:16px;">No ${title} nozzle reading entered for ${fmtDate(date)}. Pick another date, or add the reading in the Nozzle Sales page.</div>`;
+    const from = addDaysISO(date,-13);
+    body = detail + nrMatrixHtml(kind, 'Date', nrDayBuckets(kind, from, date), 'Last 14 Days — ending '+fmtDate(date), true);
+  }
+  else if(nrTab==='weekly'){
+    const start = st.weekStart, end = addDaysISO(start,6);
+    picker = `<label style="font-weight:700; font-size:13px;">Week start</label>
+      <input type="date" value="${start}" onchange="_nr['${kind}'].weekStart=this.value; renderPage();" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px;">
+      <button class="btn btn-sm" onclick="_nr['${kind}'].weekStart='${addDaysISO(start,-7)}'; renderPage();">◀ Prev week</button>
+      <button class="btn btn-sm" onclick="_nr['${kind}'].weekStart='${addDaysISO(start,7)}'; renderPage();">Next week ▶</button>
+      <span class="small-note">Week: <b>${fmtDate(start)} — ${fmtDate(end)}</b></span>`;
+    const d = nrCollect(kind, start, end);
+    body = nrSummaryHtml(kind, d, title+' — Nozzle Totals for the Week') + nrMatrixHtml(kind, 'Date', nrDayBuckets(kind, start, end), 'Day-by-Day', true);
+  }
+  else {
+    const year = st.year;
+    picker = `<label style="font-weight:700; font-size:13px;">Year</label>
+      <input type="number" value="${year}" onchange="_nr['${kind}'].year=Number(this.value); renderPage();" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px; width:110px;">
+      <span class="small-note">Showing: <b>Year ${year}</b></span>`;
+    const d = nrCollect(kind, year+'-01-01', year+'-12-31');
+    const buckets = NR_MONTHS.map((m,mi)=>{
+      const mm = pad2(mi+1);
+      const rows = d.rows.filter(r=>r.date.slice(5,7)===mm);
+      const sales = nz.map((n,i)=> rows.reduce((s,r)=>s+r.c.sales[i],0));
+      return {label:m, sales, litres:rows.reduce((s,r)=>s+r.c.totalLitres,0), amount:rows.reduce((s,r)=>s+r.c.amount,0)};
+    });
+    body = nrSummaryHtml(kind, d, title+' — Nozzle Totals for '+year) + nrMatrixHtml(kind, 'Month', buckets, 'Month-by-Month', true);
+  }
+
+  el.innerHTML = `
+    <div class="tabs">${tabs.map(t=>`<button class="tab-btn ${nrTab===t[0]?'active':''}" onclick="nrTab='${t[0]}'; renderPage();">${t[1]}</button>`).join('')}</div>
+    <div class="card card-pad" style="margin-bottom:16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">${picker}</div>
+    ${body}
+    <p class="small-note">Litres per nozzle = that day's closing meter reading minus the previous reading. Sale amount = litres × the sale rate of that day.</p>`;
+}
+PAGES['nozzle-report-diesel'] = (el)=>renderNozzleReport(el,'diesel');
+PAGES['nozzle-report-petrol'] = (el)=>renderNozzleReport(el,'petrol');
 
 /* =========================================================
    PAGE: WEEKLY REPORT
